@@ -6,8 +6,10 @@ yanında çalışması gerekiyor.
 """
 import sqlite3
 from datetime import datetime
+import logging_config
 
 DB_YOLU = 'kan_bankasi.db'
+logger = logging_config.logger_al(__name__)
 
 
 def veritabani_baglan():
@@ -34,7 +36,7 @@ def kaydet(kullanici_adi, rol, islem, detay="", ip_adresi=None):
     except Exception as e:
         # Loglama hatası sessizce yutuluyor ama konsola yazılıyor -
         # asıl işlemi asla bozmamalı, ama sorunu da görünmez kılmamalı.
-        print(f"⚠️ Audit log kaydı başarısız oldu: {e}")
+        logger.error(f"Audit log kaydı başarısız oldu: {e}")
 
 
 def gecmisi_getir(limit=100, kullanici_adi_filtre=None):

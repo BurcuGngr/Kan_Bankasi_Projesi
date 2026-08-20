@@ -16,6 +16,11 @@ import auth
 @pytest.fixture
 def client(test_db):
     flask_app_module.app.config['TESTING'] = True
+    # Testler aynı IP'den (127.0.0.1, test client simülasyonu) çok sayıda
+    # giriş isteği gönderiyor - rate limiting açık kalsaydı bazı testler
+    # gerçek bir hata olmadan sadece "çok fazla istek" yüzünden başarısız
+    # olurdu. Bu yüzden test ortamında rate limiting'i tamamen kapatıyoruz.
+    flask_app_module.app.config['RATELIMIT_ENABLED'] = False
     with flask_app_module.app.test_client() as client:
         yield client
 

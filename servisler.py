@@ -7,6 +7,9 @@ bağımlı olsaydı, test yazmak ve yeniden kullanmak zorlaşırdı.
 """
 import sqlite3
 from datetime import datetime, timedelta
+import logging_config
+
+logger = logging_config.logger_al(__name__)
 
 DB_YOLU = 'kan_bankasi.db'
 
@@ -73,7 +76,7 @@ def uygun_bagiscilari_getir(kan_grubu_id, gece_mi=False):
                         'gecen_gun': gecen_gun
                     })
             except ValueError:
-                print(f"⚠️ Hatalı tarih formatı: {son_bagis_str}")
+                logger.warning(f"Hatalı tarih formatı: {son_bagis_str}")
         else:
             uygun_bagiscilar.append({
                 'ad_soyad': f"{aday['kullanici_adi']} {aday['kullanici_soyadi']}",
@@ -98,7 +101,7 @@ def bagis_ekle(kullanici_id, kan_grubu_id):
         conn.commit()
         return True
     except Exception as e:
-        print(f"Bağış eklenirken hata oluştu: {e}")
+        logger.error(f"Bağış eklenirken hata oluştu: {e}")
         conn.rollback()
         return False
     finally:
@@ -172,7 +175,7 @@ def uygun_yedek_stok_getir(kan_grubu_adi):
         alternatif_stoklar = [dict(row) for row in cursor.fetchall()]
         return alternatif_stoklar
     except Exception as e:
-        print(f"❌ Bir hata oluştu: {e}")
+        logger.error(f"Uyumlu stok sorgusunda hata: {e}")
         return []
     finally:
         conn.close()
@@ -198,7 +201,7 @@ def bagisci_puan_ve_rozet_hesapla(bagisci_id):
             rozet = "🏅Yeni Bağışçı"
         return {"toplam_bagis": toplam_bagis, "puan": puan, "rozet": rozet}
     except Exception as e:
-        print(f"❌ Puan hesaplanırken hata oluştu: {e}")
+        logger.error(f"Puan hesaplanırken hata oluştu: {e}")
         return None
     finally:
         conn.close()
@@ -246,7 +249,7 @@ def acil_cagri_listesi_hazirla(kan_grubu_id):
                 })
         return acil_liste
     except Exception as e:
-        print(f"❌ Acil çağrı listesi oluşturulurken hata: {e}")
+        logger.error(f"Acil çağrı listesi oluşturulurken hata: {e}")
         return []
     finally:
         conn.close()
@@ -292,7 +295,7 @@ def sktt_riskli_stoklari_getir():
             })
         return rapor_listesi
     except Exception as e:
-        print(f"❌ Stok risk analizi hatası: {e}")
+        logger.error(f"Stok risk analizi hatası: {e}")
         return []
     finally:
         conn.close()
@@ -442,7 +445,7 @@ def agirlikli_acil_liste_hazirla(kan_grubu_id, gece_cagrisi_mi=False):
         skorlu_liste.sort(key=lambda x: x['oncelik_skoru'], reverse=True)
         return skorlu_liste
     except Exception as e:
-        print(f"❌ Öncelik skoru hesaplanırken hata: {e}")
+        logger.error(f"Öncelik skoru hesaplanırken hata: {e}")
         return []
     finally:
         conn.close()
@@ -464,7 +467,7 @@ def gunluk_ortalama_tuketim_hesapla(kan_grubu_id, gun_sayisi=30):
         toplam = cursor.fetchone()['toplam']
         return round(toplam / gun_sayisi, 2)
     except Exception as e:
-        print(f"❌ Ortalama tüketim hesaplanırken hata: {e}")
+        logger.error(f"Ortalama tüketim hesaplanırken hata: {e}")
         return 0
     finally:
         conn.close()
@@ -529,6 +532,111 @@ def tum_gruplar_icin_stok_tahmini(gun_sayisi=30):
             rapor.append(tahmin)
     rapor.sort(key=lambda x: (x['tahmini_bitis_gunu'] is None, x['tahmini_bitis_gunu']))
     return rapor
+
+
+# ============================================================
+# BİRİM BAZLI KAN TALEBİ (ilanlar_talepler)
+# ============================================================
+def talep_olustur(kan_grubu_id, talep_eden_birim):
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO ilanlar_talepler (kan_grubu_id, talep_eden_birim, ilan_talep_durum) VALUES (?, ?, 'AKTİF')",
+            (kan_grubu_id, talep_eden_birim)
+        )
+        conn.commit()
+        return True, cursor.lastrowid
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Talep oluşturulurken hata: {e}")
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+def aktif_talepleri_getir():
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT t.id, kg.grup_adi, t.talep_eden_birim, t.ilan_talep_durum, t.ilan_talep_tarihi
+            FROM ilanlar_talepler t
+            JOIN kan_gruplari kg ON t.kan_grubu_id = kg.id
+            WHERE t.ilan_talep_durum = 'AKTİF'
+            ORDER BY t.ilan_talep_tarihi ASC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def talep_kapat(talep_id):
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM ilanlar_talepler WHERE id = ?", (talep_id,))
+        if not cursor.fetchone():
+            return False, "Talep bulunamadı."
+        cursor.execute("UPDATE ilanlar_talepler SET ilan_talep_durum = 'KARŞILANDI' WHERE id = ?", (talep_id,))
+        conn.commit()
+        return True, "Talep karşılandı olarak işaretlendi."
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Talep kapatılırken hata: {e}")
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+# ============================================================
+# KULLANICI (BAĞIŞÇI) EKLEME
+# ============================================================
+def kullanici_ekle(kan_grubu_id, ad, soyad, cinsiyet, birim, telefon, eposta=None, bildirim_izni=1, gece_aranir_mi=0):
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO kullaniciler
+            (kan_grubu_id, kullanici_adi, kullanici_soyadi, kullanici_cinsiyet, kullanici_birim, kullanici_telefon, kullanici_eposta, kullanici_bildirim_izni, kullanici_gece_aranir_mi)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (kan_grubu_id, ad, soyad, cinsiyet, birim, telefon, eposta, bildirim_izni, gece_aranir_mi))
+        conn.commit()
+        return True, cursor.lastrowid
+    except sqlite3.IntegrityError:
+        return False, "Bu telefon numarasıyla kayıtlı bir kullanıcı zaten var."
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Kullanıcı eklenirken hata: {e}")
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+# ============================================================
+# ELLE STOK GİRİŞİ (bağış dışı - transfer, kampanya vb.)
+# ============================================================
+def stok_girisi_yap(kan_grubu_id, adet):
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT torba_sayisi FROM stoklar WHERE kan_grubu_id = ?", (kan_grubu_id,))
+        stok = cursor.fetchone()
+        if not stok:
+            return False, "Bu kan grubu için stok kaydı bulunamadı."
+
+        cursor.execute(
+            "UPDATE stoklar SET torba_sayisi = torba_sayisi + ? WHERE kan_grubu_id = ?",
+            (adet, kan_grubu_id)
+        )
+        conn.commit()
+        return True, f"{adet} torba eklendi, yeni stok: {stok['torba_sayisi'] + adet}"
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Stok girişi yapılırken hata: {e}")
+        return False, str(e)
+    finally:
+        conn.close()
 
 
 # ============================================================

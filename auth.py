@@ -43,6 +43,28 @@ def kullanici_olustur(kullanici_adi, sifre, rol='personel'):
         conn.close()
 
 
+def suresi_dolmus_tokenlari_temizle():
+    """
+    api_oturumlari tablosundaki süresi dolmuş (artık geçersiz) token
+    kayıtlarını siler. Bu olmadan tablo sonsuza kadar büyür - her giriş
+    yeni bir satır ekler ama hiçbiri silinmez.
+
+    Ne zaman çağrılır: Her başarılı girişte otomatik olarak (aşağıdaki
+    giris_yap fonksiyonu içinde). Ayrıca token_temizle.py scripti ile
+    elle veya zamanlanmış bir görevle (cron) de tetiklenebilir.
+    """
+    conn = veritabani_baglan()
+    cursor = conn.cursor()
+    try:
+        simdi = datetime.now().isoformat()
+        cursor.execute("DELETE FROM api_oturumlari WHERE gecerlilik_tarihi < ?", (simdi,))
+        silinen = cursor.rowcount
+        conn.commit()
+        return silinen
+    finally:
+        conn.close()
+
+
 def giris_yap(kullanici_adi, sifre):
     """
     Kullanıcı adı/şifre doğruysa yeni bir token üretir ve döner.
@@ -72,6 +94,11 @@ def giris_yap(kullanici_adi, sifre):
             (token, kullanici['id'], simdi.isoformat(), bitis.isoformat())
         )
         conn.commit()
+
+        # Fırsat bulduğumuzda (her girişte) süresi dolmuş eski token'ları
+        # temizliyoruz - ayrı bir zamanlanmış görev kurmaya gerek kalmadan
+        # tablo kendiliğinden düzenli tutulur.
+        suresi_dolmus_tokenlari_temizle()
 
         return {'token': token, 'rol': kullanici['rol'], 'gecerlilik_saat': TOKEN_GECERLILIK_SAAT}
     finally:

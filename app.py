@@ -10,6 +10,8 @@ tekrar yazman gerekir.
 """
 from functools import wraps
 from flask import Flask, jsonify, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 import servisler
 import auth
@@ -18,6 +20,18 @@ import bildirim
 from openapi import OPENAPI_SEMA
 
 app = Flask(__name__)
+
+# YENİ: Rate limiting. IP adresine göre istek sayısını sınırlar.
+# En önemli kullanım yeri /api/auth/giris - bu olmadan biri saniyede
+# binlerce şifre denemesi gönderebilir (brute-force saldırısı).
+# Testler sırasında bu sınırlamanın testleri bozmaması için
+# RATELIMIT_ENABLED, test fixture'ında False'a çekiliyor (tests/conftest.py).
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[],  # varsayılan olarak sınır yok, sadece işaretlediğimiz endpoint'lerde var
+    storage_uri="memory://"
+)
 
 
 # ============================================================
@@ -67,6 +81,7 @@ def _bool_param(ad, varsayilan=False):
 # GİRİŞ (AUTH) ENDPOINT'İ
 # ============================================================
 @app.route('/api/auth/giris', methods=['POST'])
+@limiter.limit("5 per minute")
 def giris():
     veri = request.get_json(silent=True) or {}
     kullanici_adi = veri.get('kullanici_adi')
@@ -208,6 +223,115 @@ def bagis_ekle():
     if not basarili:
         return jsonify({'hata': 'Bağış eklenemedi.'}), 500
     return jsonify({'basarili': True})
+
+
+# ============================================================
+# YENİ BAĞIŞÇI (KULLANICI) EKLEME
+# ============================================================
+@app.route('/api/bagiscilar/ekle', methods=['POST'])
+@giris_gerekli()
+def bagisci_ekle_endpoint():
+    veri = request.get_json(silent=True) or {}
+    zorunlu_alanlar = ['kan_grubu_id', 'ad', 'soyad', 'cinsiyet', 'birim', 'telefon']
+    eksikler = [a for a in zorunlu_alanlar if not veri.get(a)]
+    if eksikler:
+        return jsonify({'hata': f"Eksik alan(lar): {', '.join(eksikler)}"}), 400
+
+    basarili, sonuc = servisler.kullanici_ekle(
+        kan_grubu_id=veri['kan_grubu_id'],
+        ad=veri['ad'],
+        soyad=veri['soyad'],
+        cinsiyet=veri['cinsiyet'],
+        birim=veri['birim'],
+        telefon=veri['telefon'],
+        eposta=veri.get('eposta'),
+        bildirim_izni=veri.get('bildirim_izni', 1),
+        gece_aranir_mi=veri.get('gece_aranir_mi', 0)
+    )
+
+    audit.kaydet(
+        request.kullanici['kullanici_adi'], request.kullanici['rol'],
+        'BAGISCI_EKLENDI' if basarili else 'BAGISCI_EKLEME_BASARISIZ',
+        detay=f"ad={veri.get('ad')} soyad={veri.get('soyad')}, sonuc={sonuc}",
+        ip_adresi=request.remote_addr
+    )
+
+    if not basarili:
+        return jsonify({'hata': sonuc}), 400
+    return jsonify({'basarili': True, 'kullanici_id': sonuc})
+
+
+# ============================================================
+# ELLE STOK GİRİŞİ (bağış dışı - transfer, kampanya vb.)
+# ============================================================
+@app.route('/api/stoklar/giris', methods=['POST'])
+@giris_gerekli(rol='admin')
+def stok_girisi():
+    veri = request.get_json(silent=True) or {}
+    kan_grubu_id = veri.get('kan_grubu_id')
+    adet = veri.get('adet')
+
+    if kan_grubu_id is None or adet is None:
+        return jsonify({'hata': 'kan_grubu_id ve adet zorunludur.'}), 400
+    if not isinstance(adet, int) or adet <= 0:
+        return jsonify({'hata': 'adet pozitif bir tam sayı olmalıdır.'}), 400
+
+    basarili, mesaj = servisler.stok_girisi_yap(kan_grubu_id, adet)
+    audit.kaydet(
+        request.kullanici['kullanici_adi'], request.kullanici['rol'],
+        'STOK_GIRISI' if basarili else 'STOK_GIRISI_BASARISIZ',
+        detay=f"kan_grubu_id={kan_grubu_id}, adet={adet}, sonuc={mesaj}",
+        ip_adresi=request.remote_addr
+    )
+    if not basarili:
+        return jsonify({'hata': mesaj}), 400
+    return jsonify({'basarili': True, 'mesaj': mesaj})
+
+
+# ============================================================
+# BİRİM BAZLI KAN TALEBİ
+# ============================================================
+@app.route('/api/talepler', methods=['GET'])
+@giris_gerekli()
+def talepleri_getir():
+    return jsonify(servisler.aktif_talepleri_getir())
+
+
+@app.route('/api/talepler', methods=['POST'])
+@giris_gerekli()
+def talep_olustur_endpoint():
+    veri = request.get_json(silent=True) or {}
+    kan_grubu_id = veri.get('kan_grubu_id')
+    talep_eden_birim = veri.get('talep_eden_birim')
+
+    if not kan_grubu_id or not talep_eden_birim:
+        return jsonify({'hata': 'kan_grubu_id ve talep_eden_birim zorunludur.'}), 400
+
+    basarili, sonuc = servisler.talep_olustur(kan_grubu_id, talep_eden_birim)
+    audit.kaydet(
+        request.kullanici['kullanici_adi'], request.kullanici['rol'],
+        'TALEP_OLUSTURULDU' if basarili else 'TALEP_OLUSTURMA_BASARISIZ',
+        detay=f"kan_grubu_id={kan_grubu_id}, birim={talep_eden_birim}",
+        ip_adresi=request.remote_addr
+    )
+    if not basarili:
+        return jsonify({'hata': sonuc}), 400
+    return jsonify({'basarili': True, 'talep_id': sonuc})
+
+
+@app.route('/api/talepler/<int:talep_id>/kapat', methods=['POST'])
+@giris_gerekli(rol='admin')
+def talep_kapat_endpoint(talep_id):
+    basarili, mesaj = servisler.talep_kapat(talep_id)
+    audit.kaydet(
+        request.kullanici['kullanici_adi'], request.kullanici['rol'],
+        'TALEP_KAPATILDI' if basarili else 'TALEP_KAPATMA_BASARISIZ',
+        detay=f"talep_id={talep_id}",
+        ip_adresi=request.remote_addr
+    )
+    if not basarili:
+        return jsonify({'hata': mesaj}), 404
+    return jsonify({'basarili': True, 'mesaj': mesaj})
 
 
 # ============================================================

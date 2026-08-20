@@ -1,14 +1,15 @@
 # Veritabanı - içinde gerçek kişi verisi ve şifre hash'leri var, asla paylaşılmamalı
 kan_bankasi.db
 *.db
-
 # Ortam değişkenleri / sırlar
-.env
-
+.env 
 # Python
 __pycache__/
 *.pyc
 .pytest_cache/
 
 # Flask log dosyası
-flask.log
+flask.log 
+# Uygulama log dosyası (logging_config.py tarafından oluşturulur)
+uygulama.log
+uygulama.log.*

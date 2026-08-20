@@ -104,3 +104,75 @@ def test_var_olmayan_kullanici_icin_hata_donuyor(ornek_veri):
     sonuc = servisler.bagis_uygunluk_kontrol_et(kullanici_id=999)
     assert sonuc['uygun_mu'] is False
     assert 'bulunamadı' in sonuc['mesaj'].lower()
+
+
+# ============================================================
+# YENİ BAĞIŞÇI EKLEME TESTLERİ
+# ============================================================
+def test_yeni_bagisci_eklenebiliyor(ornek_veri):
+    basarili, sonuc = servisler.kullanici_ekle(
+        kan_grubu_id=1, ad='Yeni', soyad='Kisi', cinsiyet='Erkek',
+        birim='Test Birimi', telefon='05551112233'
+    )
+    assert basarili is True
+    assert isinstance(sonuc, int)  # yeni kullanıcının id'si döner
+
+
+def test_ayni_telefonla_iki_kez_eklenemiyor(ornek_veri):
+    servisler.kullanici_ekle(
+        kan_grubu_id=1, ad='Birinci', soyad='Kisi', cinsiyet='Erkek',
+        birim='X', telefon='05551112233'
+    )
+    basarili, mesaj = servisler.kullanici_ekle(
+        kan_grubu_id=1, ad='Ikinci', soyad='Kisi', cinsiyet='Kadın',
+        birim='Y', telefon='05551112233'
+    )
+    assert basarili is False
+    assert 'zaten var' in mesaj.lower()
+
+
+# ============================================================
+# ELLE STOK GİRİŞİ TESTLERİ
+# ============================================================
+def test_stok_girisi_torba_sayisini_artiriyor(ornek_veri):
+    # ornek_veri: A Rh+ = 15 torba
+    basarili, mesaj = servisler.stok_girisi_yap(kan_grubu_id=1, adet=5)
+    assert basarili is True
+
+    guncel = servisler.kritik_stoklari_getir()
+    # A Rh+ zaten kritik değildi, hala olmamalı ama stoğun arttığını
+    # dolaylı olarak kan_cikis_yap ile test edelim
+    basarili2, _ = servisler.kan_cikis_yap(kan_grubu_id=1, adet=19)  # 15+5-19=1, mümkün olmalı
+    assert basarili2 is True
+
+
+def test_var_olmayan_kan_grubuna_stok_girisi_basarisiz(ornek_veri):
+    basarili, mesaj = servisler.stok_girisi_yap(kan_grubu_id=999, adet=5)
+    assert basarili is False
+
+
+# ============================================================
+# KAN TALEBİ TESTLERİ
+# ============================================================
+def test_talep_olusturulup_listelenebiliyor(ornek_veri):
+    basarili, talep_id = servisler.talep_olustur(kan_grubu_id=1, talep_eden_birim='Acil Servis')
+    assert basarili is True
+
+    aktif_liste = servisler.aktif_talepleri_getir()
+    assert len(aktif_liste) == 1
+    assert aktif_liste[0]['talep_eden_birim'] == 'Acil Servis'
+    assert aktif_liste[0]['grup_adi'] == 'A Rh+'
+
+
+def test_kapatilan_talep_aktif_listede_gorunmuyor(ornek_veri):
+    basarili, talep_id = servisler.talep_olustur(kan_grubu_id=1, talep_eden_birim='Acil Servis')
+    kapatma_basarili, _ = servisler.talep_kapat(talep_id)
+    assert kapatma_basarili is True
+
+    aktif_liste = servisler.aktif_talepleri_getir()
+    assert len(aktif_liste) == 0
+
+
+def test_var_olmayan_talep_kapatilamiyor(ornek_veri):
+    basarili, mesaj = servisler.talep_kapat(talep_id=999)
+    assert basarili is False

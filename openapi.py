@@ -234,6 +234,90 @@ OPENAPI_SEMA = {
                 }
             }
         },
+        "/api/bagiscilar/ekle": {
+            "post": {
+                "summary": "Yeni bir bağışçı/kullanıcı kaydı oluşturur",
+                "security": BEARER_GUVENLIK,
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "kan_grubu_id": {"type": "integer"},
+                            "ad": {"type": "string"},
+                            "soyad": {"type": "string"},
+                            "cinsiyet": {"type": "string"},
+                            "birim": {"type": "string"},
+                            "telefon": {"type": "string"},
+                            "eposta": {"type": "string"}
+                        },
+                        "required": ["kan_grubu_id", "ad", "soyad", "cinsiyet", "birim", "telefon"]
+                    }}}
+                },
+                "responses": {
+                    "200": {"description": "Bağışçı eklendi"},
+                    "400": {"description": "Eksik alan ya da telefon zaten kayıtlı"}
+                }
+            }
+        },
+        "/api/stoklar/giris": {
+            "post": {
+                "summary": "[SADECE ADMIN] Bağış dışı elle stok girişi (transfer, kampanya vb.)",
+                "security": BEARER_GUVENLIK,
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "kan_grubu_id": {"type": "integer"},
+                            "adet": {"type": "integer"}
+                        },
+                        "required": ["kan_grubu_id", "adet"]
+                    }}}
+                },
+                "responses": {
+                    "200": {"description": "Stok girişi yapıldı"},
+                    "400": {"description": "Eksik/geçersiz alan"},
+                    "403": {"description": "Sadece admin"}
+                }
+            }
+        },
+        "/api/talepler": {
+            "get": {
+                "summary": "Aktif kan taleplerini listeler",
+                "security": BEARER_GUVENLIK,
+                "responses": {"200": {"description": "Aktif talep listesi"}}
+            },
+            "post": {
+                "summary": "Bir birim adına yeni kan talebi oluşturur",
+                "security": BEARER_GUVENLIK,
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "kan_grubu_id": {"type": "integer"},
+                            "talep_eden_birim": {"type": "string"}
+                        },
+                        "required": ["kan_grubu_id", "talep_eden_birim"]
+                    }}}
+                },
+                "responses": {"200": {"description": "Talep oluşturuldu"}}
+            }
+        },
+        "/api/talepler/{talep_id}/kapat": {
+            "post": {
+                "summary": "[SADECE ADMIN] Bir talebi 'karşılandı' olarak işaretler",
+                "security": BEARER_GUVENLIK,
+                "parameters": [
+                    {"name": "talep_id", "in": "path", "required": True, "schema": {"type": "integer"}}
+                ],
+                "responses": {
+                    "200": {"description": "Talep kapatıldı"},
+                    "404": {"description": "Talep bulunamadı"}
+                }
+            }
+        },
         "/api/audit/gecmis": {
             "get": {
                 "summary": "[SADECE ADMIN] Sistem işlem geçmişini (audit trail) listeler",
