@@ -1,56 +1,45 @@
-"""
-İşlem geçmişi (audit trail) kayıtlarını yönetir. servisler.py'den ayrı
-tutulma nedeni: bu, iş mantığından bağımsız bir "yan etki" (cross-cutting
-concern) - kan bankası kurallarıyla ilgisi yok, ama neredeyse her işlemin
-yanında çalışması gerekiyor.
-"""
-import sqlite3
-from datetime import datetime
-import logging_config
+"""Sistem işlem geçmişi (audit trail) yardımcıları."""
 
-DB_YOLU = 'kan_bankasi.db'
-logger = logging_config.logger_al(__name__)
+import veritabani
 
 
-def veritabani_baglan():
-    conn = sqlite3.connect(DB_YOLU)
-    conn.row_factory = sqlite3.Row
-    return conn
+def kaydet(api_kullanici_id=None, islem_turu="", detay="", ip_adresi=None, conn=None):
+    """İşlemi denetim günlüğüne yazar; varsa mevcut transaction'ı kullanır."""
 
-
-def kaydet(kullanici_adi, rol, islem, detay="", ip_adresi=None):
-    """
-    Bir işlemi geçmişe kaydeder. Bu fonksiyon ASLA exception fırlatmamalı -
-    loglama başarısız olduğu için asıl işlemin (örn. kan çıkışı) iptal
-    olması kabul edilemez. Bu yüzden geniş bir try/except ile sarılı.
-    """
+    sahip = conn is None
+    if sahip:
+        conn = veritabani.baglanti_al()
     try:
-        conn = veritabani_baglan()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO islem_gecmisi (kullanici_adi, rol, islem, detay, ip_adresi, tarih) VALUES (?, ?, ?, ?, ?, ?)",
-            (kullanici_adi, rol, islem, detay, ip_adresi, datetime.now().isoformat())
+        conn.execute(
+            """
+            INSERT INTO islem_gecmisi (api_kullanici_id, islem_turu, detay, ip_adresi)
+            VALUES (?, ?, ?, ?)
+            """,
+            (api_kullanici_id, islem_turu, detay, ip_adresi),
         )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        # Loglama hatası sessizce yutuluyor ama konsola yazılıyor -
-        # asıl işlemi asla bozmamalı, ama sorunu da görünmez kılmamalı.
-        logger.error(f"Audit log kaydı başarısız oldu: {e}")
-
-
-def gecmisi_getir(limit=100, kullanici_adi_filtre=None):
-    """Son işlemleri, en yeniden en eskiye doğru döner."""
-    conn = veritabani_baglan()
-    cursor = conn.cursor()
-    try:
-        if kullanici_adi_filtre:
-            cursor.execute(
-                "SELECT * FROM islem_gecmisi WHERE kullanici_adi = ? ORDER BY tarih DESC LIMIT ?",
-                (kullanici_adi_filtre, limit)
-            )
-        else:
-            cursor.execute("SELECT * FROM islem_gecmisi ORDER BY tarih DESC LIMIT ?", (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+        if sahip:
+            conn.commit()
+        return True
+    except Exception:
+        if sahip:
+            conn.rollback()
+        return False
     finally:
-        conn.close()
+        if sahip:
+            conn.close()
+
+
+def gecmis_listele(limit=50):
+    with veritabani.baglanti_al() as conn:
+        satirlar = conn.execute(
+            """
+            SELECT g.id, COALESCE(k.kullanici_adi, 'sistem') AS kullanici_adi,
+                   g.islem_turu, g.detay, g.ip_adresi, g.tarih
+            FROM islem_gecmisi g
+            LEFT JOIN api_kullanicilari k ON g.api_kullanici_id = k.id
+            ORDER BY g.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(satir) for satir in satirlar]

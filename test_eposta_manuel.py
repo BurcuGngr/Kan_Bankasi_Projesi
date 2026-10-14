@@ -16,7 +16,9 @@ import bildirim
 if __name__ == '__main__':
     alici = input("Test e-postasının gönderileceği adres (kendi mailini yaz): ").strip()
 
-    konu, icerik = bildirim.acil_kan_ihtiyaci_bildirimi_olustur("0 Rh-", hastane_adi="Test Hastanesi")
+    konu, icerik = bildirim.acil_kan_ihtiyaci_bildirimi_olustur(
+        "0 Rh-", "Acil servis için uygun bağışçı çağrısı", hastane_adi="Kan Bankası"
+    )
 
     print("\nGönderiliyor...")
     basarili, mesaj = bildirim.eposta_gonder(alici, konu, icerik)

@@ -28,3 +28,18 @@ jobs:
 
       - name: Testleri çalıştır
         run: python -m pytest -v
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Arayüz bağımlılıklarını kur
+        working-directory: frontend
+        run: npm ci
+
+      - name: Arayüzü derle
+        working-directory: frontend
+        run: npm run build
